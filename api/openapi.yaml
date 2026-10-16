@@ -1,0 +1,258 @@
+openapi: 3.1.0
+info:
+  title: Go Skeleton API
+  version: 0.1.0
+  description: |
+    Example API built from the go_skeleton template.
+
+    Errors follow RFC 9457 (`application/problem+json`) and carry a stable
+    machine-readable `code`, the `request_id` and, for validation failures,
+    the list of offending fields.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+security:
+  - bearerAuth: []
+tags:
+  - name: System
+  - name: Projects
+paths:
+  /livez:
+    get:
+      tags: [System]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /readyz:
+    get:
+      tags: [System]
+      summary: Readiness probe
+      description: Checks the database (and Redis when configured). Returns 503 while draining before shutdown.
+      security: []
+      responses:
+        "200":
+          description: Ready to receive traffic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: A dependency is down or the instance is draining.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/projects:
+    get:
+      tags: [Projects]
+      summary: List my projects
+      operationId: listProjects
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring of the name.
+          schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of projects, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    post:
+      tags: [Projects]
+      summary: Create a project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProjectRequest" }
+      responses:
+        "201":
+          description: Created.
+          headers:
+            Location:
+              description: URL of the new project.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Projects]
+      summary: Get a project
+      operationId: getProject
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      description: Partial update — absent fields are left unchanged.
+      operationId: updateProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProjectRequest" }
+      responses:
+        "200":
+          description: The updated project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      operationId: deleteProject
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OIDC/JWT access token (AUTH_MODE=jwt). With AUTH_MODE=dev (local only),
+        the token is the user id, optionally followed by roles: `alice:admin`.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, fail, draining] }
+        checks:
+          type: object
+          additionalProperties: { type: string, enum: [ok, fail] }
+    Project:
+      type: object
+      required: [id, name, description, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 2000 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProjectList:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Project" }
+        page: { $ref: "#/components/schemas/Page" }
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 2000 }
+    UpdateProjectRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 2000 }
+    Page:
+      type: object
+      required: [limit, offset, total]
+      properties:
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer }
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, example: about:blank }
+        title: { type: string, example: Not Found }
+        status: { type: integer, example: 404 }
+        detail: { type: string, example: project not found }
+        instance: { type: string, example: /v1/projects/0190f1c6-7a3e-7c1a-9d5e-2a1b3c4d5e6f }
+        code: { type: string, description: Stable machine-readable error code., example: project.not_found }
+        request_id: { type: string }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+    FieldError:
+      type: object
+      required: [field, rule, message]
+      properties:
+        field: { type: string, example: name }
+        rule: { type: string, example: required }
+        message: { type: string, example: is required }
+  responses:
+    BadRequest:
+      description: Malformed or invalid request.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: Missing or invalid access token.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: The resource does not exist.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: The request conflicts with the current state.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PayloadTooLarge:
+      description: The request body is too large.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: Rate limit exceeded; see the Retry-After header.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }

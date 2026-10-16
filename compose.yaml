@@ -1,0 +1,61 @@
+# Local dependencies. Ports are bound to 127.0.0.1 only.
+#   make up                     -> PostgreSQL
+#   make up PROFILES=redis      -> PostgreSQL + Redis
+#   make compose-app            -> + migrations and the API in containers
+name: go-skeleton
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/<major>/.
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8-alpine
+    profiles: [redis]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    profiles: [app]
+    entrypoint: ["/app/migrate", "up"]
+    environment:
+      DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    profiles: [app]
+    environment:
+      APP_ENV: dev
+      AUTH_MODE: dev
+      LOG_FORMAT: text
+      DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pg_data:
