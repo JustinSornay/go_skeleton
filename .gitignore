@@ -1,0 +1,23 @@
+# Binaries and build output
+/bin/
+*.exe
+*.test
+
+# Test and coverage artefacts
+*.out
+coverage.*
+
+# Local configuration: never commit secrets
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# Go workspaces
+go.work
+go.work.sum

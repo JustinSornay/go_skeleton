@@ -1,0 +1,45 @@
+# golangci-lint v2 — run with `make lint`.
+version: "2"
+
+run:
+  # Lint integration tests too.
+  build-tags: [integration]
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose     # HTTP response bodies are closed
+    - errorlint     # errors are compared with errors.Is/As
+    - gocritic
+    - gosec
+    - misspell
+    - noctx         # HTTP requests and SQL queries carry a context
+    - nolintlint    # //nolint directives are specific and justified
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true # doc comments are encouraged, not mandated, on obvious methods
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [bodyclose, errcheck, gosec, noctx, unparam]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/JustinSornay/go_skeleton
