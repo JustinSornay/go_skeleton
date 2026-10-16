@@ -5,7 +5,8 @@
 //   - --dry-run reports without deleting;
 //   - bounded batches, so a large backlog never holds long locks;
 //   - the context carries a "cron" actor for traceability;
-//   - a global timeout so a stuck job cannot run forever.
+//   - a global timeout so a stuck job cannot run forever;
+//   - no SQL here: the job builds the repositories it uses, like internal/app.
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 
 	"github.com/JustinSornay/go_skeleton/internal/config"
 	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database"
+	"github.com/JustinSornay/go_skeleton/internal/repository"
 	"github.com/JustinSornay/go_skeleton/internal/utils/actor"
 	"github.com/JustinSornay/go_skeleton/internal/utils/logging"
 )
@@ -81,25 +83,19 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
-// purgeAuditLog deletes (or counts, when dryRun) rows older than cutoff.
+// purgeAuditLog deletes (or counts, when dryRun) rows older than cutoff, in
+// batches of batchSize.
 func purgeAuditLog(ctx context.Context, db *database.DB, cutoff time.Time, batchSize int, dryRun bool) (int64, error) {
+	audit := repository.NewAuditRepository(db)
 	if dryRun {
-		var n int64
-		err := db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE occurred_at < $1`, cutoff).Scan(&n)
-		return n, err
+		return audit.CountOlderThan(ctx, cutoff)
 	}
 	var total int64
 	for {
-		tag, err := db.Q(ctx).Exec(ctx, `
-			DELETE FROM audit_log WHERE id IN (
-				SELECT id FROM audit_log WHERE occurred_at < $1 ORDER BY id LIMIT $2
-			)`, cutoff, batchSize)
-		if err != nil {
-			return total, fmt.Errorf("deleting batch: %w", err)
-		}
-		total += tag.RowsAffected()
-		if tag.RowsAffected() < int64(batchSize) {
-			return total, nil
+		n, err := audit.DeleteOlderThan(ctx, cutoff, batchSize)
+		total += n
+		if err != nil || n < int64(batchSize) {
+			return total, err
 		}
 	}
 }

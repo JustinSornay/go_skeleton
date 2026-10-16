@@ -4,6 +4,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -18,12 +19,14 @@ type pkg struct {
 	Imports    []string
 }
 
-// listPackages parses the import declarations of every non-test Go file of
-// the module. Reading the files directly (instead of running `go list`)
-// lets the go test cache notice when an import changes.
-func listPackages(t *testing.T) []pkg {
+// listPackages returns every folder of the module under root that holds Go
+// files, with the imports of its non-test files. A folder holding only test
+// files is listed with no imports, so the unknown-folder check still sees it;
+// test files themselves may import test kits and are not checked. Reading
+// the files directly (instead of running `go list`) lets the go test cache
+// notice when an import changes.
+func listPackages(t *testing.T, root string) []pkg {
 	t.Helper()
-	root := "../.."
 	byDir := map[string]map[string]bool{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -36,16 +39,19 @@ func listPackages(t *testing.T) []pkg {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if !strings.HasSuffix(name, ".go") {
+			return nil
+		}
+		dir, _ := filepath.Rel(root, filepath.Dir(path))
+		if byDir[dir] == nil {
+			byDir[dir] = map[string]bool{}
+		}
+		if strings.HasSuffix(name, "_test.go") {
 			return nil
 		}
 		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
 			return err
-		}
-		dir, _ := filepath.Rel(root, filepath.Dir(path))
-		if byDir[dir] == nil {
-			byDir[dir] = map[string]bool{}
 		}
 		for _, imp := range f.Imports {
 			p, _ := strconv.Unquote(imp.Path.Value)
@@ -67,9 +73,6 @@ func listPackages(t *testing.T) []pkg {
 		}
 		slices.Sort(p.Imports)
 		pkgs = append(pkgs, p)
-	}
-	if len(pkgs) < 10 {
-		t.Fatalf("found only %d packages: wrong root?", len(pkgs))
 	}
 	return pkgs
 }
@@ -135,11 +138,15 @@ type rule struct {
 }
 
 // rules is the dependency matrix, documented in internal/README.md. Layers
-// without an entry (app, archtest, cmd, outside) are only subject to the
-// global rules of TestDependencyRules.
+// without an entry (app, archtest, cmd) are only subject to the global rules
+// of TestDependencyRules.
 var rules = map[string]rule{
-	"utils":  {allow: []string{"internal/utils"}},
-	"config": {},
+	// Module packages outside internal/ and cmd/ (migrations, api) stay
+	// independent of internal/: otherwise a layer allowed to import them
+	// (infrastructure) could reach a forbidden one through them.
+	"outside": {outside: true},
+	"utils":   {allow: []string{"internal/utils"}},
+	"config":  {},
 	"model": {
 		allow: []string{"internal/utils/apperr"},
 		deny:  slices.Concat(transport, storage),
@@ -203,18 +210,22 @@ func violation(from layer, imp string) string {
 			return ""
 		}
 	}
-	if len(r.allow) == 0 {
+	if len(r.allow) == 0 && !r.outside {
 		return from.name + " must not import other packages of the module"
 	}
-	why := from.name + " may only import " + strings.Join(r.allow, ", ")
+	allowed := slices.Clone(r.allow)
 	if r.outside {
-		why += " and module packages outside internal/"
+		allowed = append(allowed, "module packages outside internal/")
 	}
-	return why
+	return from.name + " may only import " + strings.Join(allowed, ", ")
 }
 
 func TestDependencyRules(t *testing.T) {
-	for _, p := range listPackages(t) {
+	pkgs := listPackages(t, "../..")
+	if len(pkgs) < 10 {
+		t.Fatalf("found only %d packages: wrong root?", len(pkgs))
+	}
+	for _, p := range pkgs {
 		from := classify(p.ImportPath)
 		name := strings.TrimPrefix(p.ImportPath, module+"/")
 		if from.name == "unknown" {
@@ -273,12 +284,50 @@ func TestViolations(t *testing.T) {
 		{m("internal/service"), m("internal/app"), false},
 		{m("cmd/api"), m("internal/app"), true},
 		{m("internal/app"), m("cmd/api"), false},
+		{m("migrations"), m("internal/model"), false},
+		{m("migrations"), m("internal/repository"), false},
+		{m("api"), m("internal/service"), false},
+		{module, m("internal/utils/apperr"), false},
+		{m("api"), m("migrations"), true},
 	}
 	for _, tt := range tests {
 		why := violation(classify(tt.from), tt.imp)
 		if allowed := why == ""; allowed != tt.allowed {
 			t.Errorf("%s -> %s: allowed = %v (%q), want %v", tt.from, tt.imp, allowed, why, tt.allowed)
 		}
+	}
+}
+
+// TestListPackagesSeesTestOnlyFolders guards the unknown-folder check: a
+// leftover folder holding only test files must still be listed.
+func TestListPackagesSeesTestOnlyFolders(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"internal/model/model.go":                     "package model\n\nimport \"errors\"\n\nvar _ = errors.New\n",
+		"internal/platform/leftover/leftover_test.go": "package leftover_test\n\nimport \"net/http\"\n\nvar _ = http.MethodGet\n",
+	}
+	for rel, src := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[string][]string{}
+	for _, p := range listPackages(t, root) {
+		got[p.ImportPath] = p.Imports
+	}
+	if imps, ok := got[module+"/internal/model"]; !ok || !slices.Equal(imps, []string{"errors"}) {
+		t.Errorf("internal/model: got %v (listed: %v), want imports [errors]", imps, ok)
+	}
+	leftover := module + "/internal/platform/leftover"
+	if imps, ok := got[leftover]; !ok || len(imps) != 0 {
+		t.Errorf("test-only folder: listed=%v imports=%v, want listed with no imports", ok, imps)
+	}
+	if classify(leftover).name != "unknown" {
+		t.Errorf("%s must be classified as unknown", leftover)
 	}
 }
 

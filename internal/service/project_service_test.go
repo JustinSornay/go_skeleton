@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 	"uuid"
 
 	"github.com/JustinSornay/go_skeleton/internal/model"
@@ -14,19 +13,13 @@ import (
 	"github.com/JustinSornay/go_skeleton/internal/utils/apperr"
 )
 
-var t0 = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-
-func newService(repo *repositorytest.ProjectRepository, rec *repositorytest.AuditRecorder) *service.ProjectService {
-	now := t0
-	return service.NewProjectService(repo, repositorytest.Tx{}, rec, service.WithClock(func() time.Time {
-		now = now.Add(time.Second)
-		return now
-	}))
+func newProjectService(repo *repositorytest.ProjectRepository, rec *repositorytest.AuditRecorder) *service.ProjectService {
+	return service.NewProjectService(repo, repositorytest.Tx{}, rec, steppingClock())
 }
 
-func TestCreate(t *testing.T) {
+func TestCreateProject(t *testing.T) {
 	repo, rec := repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{}
-	svc := newService(repo, rec)
+	svc := newProjectService(repo, rec)
 
 	p, err := svc.Create(context.Background(), "alice", service.CreateProjectInput{Name: "  Orchard  ", Description: " apples "})
 	if err != nil {
@@ -43,8 +36,8 @@ func TestCreate(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsInvalidInput(t *testing.T) {
-	svc := newService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{})
+func TestCreateProjectRejectsInvalidInput(t *testing.T) {
+	svc := newProjectService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{})
 	tests := map[string]service.CreateProjectInput{
 		"blank name":       {Name: "   "},
 		"name too long":    {Name: strings.Repeat("é", model.ProjectMaxNameLength+1)},
@@ -67,8 +60,8 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestCreateNameIsUniquePerOwner(t *testing.T) {
-	svc := newService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{})
+func TestCreateProjectNameIsUniquePerOwner(t *testing.T) {
+	svc := newProjectService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{})
 	ctx := context.Background()
 	if _, err := svc.Create(ctx, "alice", service.CreateProjectInput{Name: "Orchard"}); err != nil {
 		t.Fatal(err)
@@ -81,17 +74,17 @@ func TestCreateNameIsUniquePerOwner(t *testing.T) {
 	}
 }
 
-func TestAuditFailureFailsTheOperation(t *testing.T) {
+func TestCreateProjectFailsWhenAuditFails(t *testing.T) {
 	boom := errors.New("audit down")
-	svc := newService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{Err: boom})
+	svc := newProjectService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{Err: boom})
 	if _, err := svc.Create(context.Background(), "alice", service.CreateProjectInput{Name: "x"}); !errors.Is(err, boom) {
 		t.Fatalf("want audit error, got %v", err)
 	}
 }
 
-func TestUpdate(t *testing.T) {
+func TestUpdateProject(t *testing.T) {
 	repo, rec := repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{}
-	svc := newService(repo, rec)
+	svc := newProjectService(repo, rec)
 	ctx := context.Background()
 	p, _ := svc.Create(ctx, "alice", service.CreateProjectInput{Name: "Orchard", Description: "apples"})
 	_, _ = svc.Create(ctx, "alice", service.CreateProjectInput{Name: "Vineyard"})
@@ -124,9 +117,9 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestDeleteProject(t *testing.T) {
 	repo, rec := repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{}
-	svc := newService(repo, rec)
+	svc := newProjectService(repo, rec)
 	ctx := context.Background()
 	p, _ := svc.Create(ctx, "alice", service.CreateProjectInput{Name: "Orchard"})
 
@@ -145,8 +138,8 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestList(t *testing.T) {
-	svc := newService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{})
+func TestListProjects(t *testing.T) {
+	svc := newProjectService(repositorytest.NewProjectRepository(), &repositorytest.AuditRecorder{})
 	ctx := context.Background()
 	for _, n := range []string{"alpha", "beta", "alphabet"} {
 		if _, err := svc.Create(ctx, "alice", service.CreateProjectInput{Name: n}); err != nil {

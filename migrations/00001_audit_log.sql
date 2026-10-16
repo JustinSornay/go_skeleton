@@ -1,6 +1,6 @@
 -- +goose Up
 -- Append-only trail of sensitive actions (who did what, to what, when).
--- Written by internal/platform/audit; purged by cmd/retention.
+-- Written by internal/repository/audit_repository.go; purged by cmd/retention.
 CREATE TABLE audit_log (
     id          bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     occurred_at timestamptz NOT NULL DEFAULT now(),

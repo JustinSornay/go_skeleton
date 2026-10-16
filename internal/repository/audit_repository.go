@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database"
 	"github.com/JustinSornay/go_skeleton/internal/model"
@@ -48,4 +49,28 @@ func (r *AuditRepository) Record(ctx context.Context, e model.AuditEvent) error 
 		return fmt.Errorf("audit: recording %s: %w", e.Action, err)
 	}
 	return nil
+}
+
+// CountOlderThan returns the number of entries recorded before cutoff.
+func (r *AuditRepository) CountOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	var n int64
+	err := r.db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE occurred_at < $1`, cutoff).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("audit: counting entries: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteOlderThan deletes at most limit entries recorded before cutoff, oldest
+// first, and returns how many it deleted. Callers loop until it deletes fewer
+// than limit, so a large backlog never holds long locks.
+func (r *AuditRepository) DeleteOlderThan(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
+	tag, err := r.db.Q(ctx).Exec(ctx, `
+		DELETE FROM audit_log WHERE id IN (
+			SELECT id FROM audit_log WHERE occurred_at < $1 ORDER BY id LIMIT $2
+		)`, cutoff, limit)
+	if err != nil {
+		return 0, fmt.Errorf("audit: deleting entries: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }

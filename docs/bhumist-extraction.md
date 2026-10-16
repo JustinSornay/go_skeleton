@@ -9,14 +9,14 @@ côté. Les références `fichier:ligne` pointent vers le dépôt Bhumist.
 
 | Pratique Bhumist | Où dans Bhumist | Où dans le squelette |
 |---|---|---|
-| Clean architecture : domaine (entités + interfaces de repository), cas d'usage, handlers, infrastructure | `internal/domain`, `internal/usecase`, `internal/handler`, `internal/infrastructure` | Conservée **par module** : `internal/project` (cœur), `httpapi/`, `postgres/` |
-| Erreurs de domaine sentinelles comparées avec `errors.Is` | `internal/domain/*/entity.go` | Sentinelles `apperr` avec `Kind` et `Code` (`project.go`) |
-| Injection par constructeur, pas de conteneur ni de service locator | `internal/app/wire*.go` | `internal/app/router.go` (une fonction de construction par module) |
+| Clean architecture : domaine (entités + interfaces de repository), cas d'usage, handlers, infrastructure | `internal/domain`, `internal/usecase`, `internal/handler`, `internal/infrastructure` | Conservée en dossiers par couche : `internal/model`, `internal/service`, `internal/controller` (+ `internal/dto`), `internal/repository`, `internal/infrastructure` |
+| Erreurs de domaine sentinelles comparées avec `errors.Is` | `internal/domain/*/entity.go` | Sentinelles `apperr` avec `Kind` et `Code` (`internal/model/project.go`) |
+| Injection par constructeur, pas de conteneur ni de service locator | `internal/app/wire*.go` | `internal/app/router.go` (une fonction de construction par fonctionnalité : `projectModule`) |
 | Racine de composition séparée de `main`, partagée avec les tests | `app.BuildRouter(app.Deps{…})` | `app.NewRouter(app.Deps{…})`, `app.New` |
-| Réponses d'erreur `application/problem+json` | `internal/middleware/error_handler.go` | `internal/platform/httpx/problem.go` (RFC 9457 + `code`, `request_id`, `errors`) |
+| Réponses d'erreur `application/problem+json` | `internal/middleware/error_handler.go` | `internal/utils/httpx/problem.go` (RFC 9457 + `code`, `request_id`, `errors`) |
 | Décodage des query params par tags `query` + `go-playground/validator` | `internal/handler/handler_helpers.go` | `httpx.BindQuery` (+ structs embarquées, slices, entiers non signés, erreurs par champ) |
 | Décodage JSON générique `decodeAndValidate[T]` | `internal/handler/decode.go` | `httpx.Bind[T]` (+ champs inconnus refusés, 413, valeur unique) |
-| DTO distincts des types de domaine, conversions explicites | `internal/handler/dto` | `internal/project/httpapi/dto.go` |
+| DTO distincts des types de domaine, conversions explicites | `internal/handler/dto` | `internal/dto/project_dto.go` |
 | Ne jamais journaliser la query string (secrets) | `internal/middleware/logger.go:66-71` (audit P2 #20) | `middleware.Logger` |
 | IP client : `X-Forwarded-For` lu de droite à gauche, proxies de confiance en CIDR | `internal/middleware/ratelimit.go:192` | `middleware.ClientIP` |
 | Plafond du nombre de clients suivis par le rate limiter | `ratelimit.go` (`max_visitors`) | `middleware.RateLimiter` (`RATE_LIMIT_MAX_CLIENTS`) |
@@ -24,13 +24,13 @@ côté. Les références `fichier:ligne` pointent vers le dépôt Bhumist.
 | Comparaison en temps constant pour la Basic Auth de la doc | `internal/middleware/basic_auth.go` | `middleware.BasicAuth` (hachage préalable : la longueur ne fuit plus) |
 | Garde-fous de production au chargement de la config | `config/config.go:255-273` | `config.Validate()` |
 | Secrets uniquement par variables d'environnement ; `Makefile` qui charge `.env` | `config/`, `Makefile:4-5` | `config`, `Makefile` |
-| « Qui agit » porté par le contexte (user, cron, système) | `pkg/actor` | `internal/platform/actor` |
-| Journal d'audit des actions sensibles | `internal/audit/recorder.go` | `internal/platform/audit` (désormais transactionnel) |
-| Cache Redis JSON + lecture « read-through » + décorateurs ; pannes de cache non bloquantes | `pkg/cache`, `internal/infrastructure/cache` | `internal/platform/cache` (`Store`, `Loader`) |
+| « Qui agit » porté par le contexte (user, cron, système) | `pkg/actor` | `internal/utils/actor` |
+| Journal d'audit des actions sensibles | `internal/audit/recorder.go` | `model.AuditRecorder`, implémenté par `internal/repository/audit_repository.go` (désormais transactionnel) |
+| Cache Redis JSON + lecture « read-through » + décorateurs ; pannes de cache non bloquantes | `pkg/cache`, `internal/infrastructure/cache` | `internal/infrastructure/cache` (`Store`, `Loader`) |
 | Migrations goose avec `Up`/`Down`, règle « ne jamais modifier une migration appliquée » | `migrations/`, `CLAUDE.md` | `migrations/` embarquées + `cmd/migrate` |
 | Binaires cron : `--dry-run`, timeout global, acteur `cron`, logique extraite de `main()` | `cmd/cron-retention` | `cmd/retention` |
-| Faux écrits à la main plutôt que mocks générés | `test/fake` | `internal/project/projecttest` |
-| testcontainers, build tags d'intégration, `TB` utilisable dans `TestMain` | `test/shared` | `internal/platform/database/dbtest` |
+| Fakes écrits à la main plutôt que mocks générés | `test/fake` | `internal/repository/repositorytest` |
+| testcontainers, build tags d'intégration, `TB` utilisable dans `TestMain` | `test/shared` | `internal/infrastructure/database/dbtest` |
 | Serveur de test monté sur le vrai routeur | `test/shared/server.go` | `internal/app/app_test.go` |
 | Tests « de contrat » sur la structure du code | `test/contract/wiring_test.go`, `docs/arch-doctor-go.md` | `internal/archtest` (automatisé) |
 | `docker compose` avec healthchecks, cibles `make` par catégorie | `docker-compose.yml`, `Makefile` | `compose.yaml`, `Makefile` (`make help`) |
@@ -53,11 +53,11 @@ côté. Les références `fichier:ligne` pointent vers le dépôt Bhumist.
 | 10 | Jeton accepté en query string `?access_token=` (`auth.go:45-47`) | Jetons dans les logs de proxies/CDN et l'historique | En-tête `Authorization` uniquement |
 | 11 | Auth couplée au SDK Firebase via un singleton global ; contournement de test par `X-Test-User-ID` + deux drapeaux | Difficile à tester, dépendances lourdes, fournisseur imposé | `auth.Verifier` : JWKS pour tout fournisseur OIDC, `DevVerifier` refusé hors dev/test |
 | 12 | `SecurityHeaders` lit `os.Getenv("APP_ENV")` directement (`security_headers.go:12`) | Configuration dispersée | Option `HTTP_HSTS` passée explicitement |
-| 13 | Viper + `config.yaml` + `os.Getenv` épars ; le paquet `config` ouvre aussi les connexions | Source de vérité éclatée | `caarlos0/env`, un seul `Config` validé ; connexions dans `platform/database` et `platform/cache` |
+| 13 | Viper + `config.yaml` + `os.Getenv` épars ; le paquet `config` ouvre aussi les connexions | Source de vérité éclatée | `caarlos0/env`, un seul `Config` validé ; connexions dans `infrastructure/database` et `infrastructure/cache` |
 | 14 | `log.Fatalf` dans le câblage (`wire_repos.go:157`) | `defer` ignorés, non testable | Erreurs retournées, ressources fermées dans l'ordre inverse |
 | 15 | Branches DevMode/surcharges de test dupliquées dans `wireRepositories` | Câblage difficile à lire | Une seule construction ; les tests fournissent leurs `Deps` |
 | 16 | Requêtes SQL dans des middlewares (`role.go`, `tier_resolver.go`), `*sql.DB` dans des handlers (listés dans `arch-doctor-go.md`) | Violation d'inversion de dépendances | Accès aux données derrière des ports ; `RequireRole` s'appuie sur les rôles du jeton |
-| 17 | `internal/handler` à plat (49 fichiers), DTO dans un paquet séparé, cas d'usage à plat | Une fonctionnalité éparpillée dans 5 dossiers | Un dossier par module |
+| 17 | Dossiers par couche à plat, nommés différemment d'une couche à l'autre : un fichier par domaine dans `internal/handler` (49 fichiers), un fichier par cas d'usage dans `internal/usecase` (`compute_projection.go`, `get_top_crops.go`…) ; READMEs de quelques lignes, sans exemple ni liste des imports autorisés | Retrouver les fichiers d'une fonctionnalité demande de fouiller chaque couche ; rien ne dit où ranger un nouveau fichier ni ce qu'il peut importer | Dossiers par couche conservés (choix expliqué dans `docs/decisions.md` §1). Un fichier par entité et par couche, nommé pareil partout (`project.go`, `project_repository.go`, `project_service.go`, `project_dto.go`, `project_controller.go`). Chaque dossier a un README : rôle, règles de dépendances, exemple réel, squelette. Les règles sont vérifiées par `internal/archtest` (voir #24) |
 | 18 | swaggo : Swagger 2.0, `docs/docs.go` de 274 Ko versionné, génération qui bloquait (commit `80b9ddf`) | Contrat dérivé de commentaires, maintenance coûteuse | OpenAPI 3.1 écrit à la main + test de concordance avec le routeur |
 | 19 | `chimiddleware.RequestID` réutilise n'importe quelle valeur d'en-tête entrante | Contenu arbitraire injecté dans les logs et les réponses | ID entrant validé (longueur, alphabet), sinon UUIDv7 |
 | 20 | Corps JSON non bornés (sauf un handler), champs inconnus acceptés, erreurs de validation brutes avec noms de champs Go | Mémoire exposée, fautes de frappe client silencieuses, messages peu exploitables | `BodyLimit` global (413), `DisallowUnknownFields`, erreurs par champ avec noms JSON |
@@ -65,7 +65,7 @@ côté. Les références `fichier:ligne` pointent vers le dépôt Bhumist.
 | 22 | Read-through sans protection contre l'effet de meute | N requêtes simultanées sur une clé froide = N appels à l'origine | `cache.Loader` avec `singleflight` |
 | 23 | Mise en place des bases de test : migrations jusqu'à la 37, insertion de cultures factices, puis suite (`test/shared/db.go`) | Fragile, données partagées entre tests | Template migré + une base clonée par test |
 | 24 | Vérifications d'architecture par recherche de chaînes dans les sources et liste de `grep` manuels | Contournables, à lancer à la main | `internal/archtest` analyse les imports à chaque `go test` |
-| 25 | Les faux peuvent diverger des vrais repositories | Tests unitaires verts sur un comportement faux | Suite de contrat exécutée sur le faux et sur PostgreSQL |
+| 25 | Les fakes peuvent diverger des vrais repositories | Tests unitaires verts sur un comportement erroné | Suite de contrat exécutée sur le fake et sur PostgreSQL |
 | 26 | CI : `go test ./...` seul, avec `DEV_MODE` | Ni lint, ni race detector, ni intégration, ni audit de dépendances | Lint, tests `-race` avec PostgreSQL, `govulncheck`, build d'image, Dependabot |
 | 27 | `lib/pq` (en maintenance), `go-redis/v8`, `google/uuid` | Dépendances datées | `pgx/v5`, `redis/go-redis/v9`, paquet `uuid` standard (Go 1.27) |
 | 28 | Artefacts de debug versionnés (`_qa_api_fix.err`, `_qa_apilog.err`, `bash.exe.stackdump`, `proj_test.json`), README de 5 octets | Bruit, informations internes exposées | `.gitignore` strict, README complet |
@@ -81,12 +81,12 @@ Certains de ces mécanismes sont de bons modèles à reprendre au besoin :
 
 | Mécanisme | Où dans Bhumist | Comment l'ajouter ici |
 |---|---|---|
-| Quotas journaliers atomiques (script Lua `INCR` + `PEXPIREAT`) | `internal/middleware/usage_quota.go` | Middleware dans `platform/middleware` avec un client Redis |
+| Quotas journaliers atomiques (script Lua `INCR` + `PEXPIREAT`) | `internal/middleware/usage_quota.go` | Middleware dans `internal/middleware`, qui dépend d'une petite interface de compteur implémentée par un client Redis dans `internal/infrastructure` |
 | Rate limiting distribué | `internal/middleware/rate_limit.go` | Idem, mais en script Lua : l'`INCR` puis `EXPIRE` séparés de Bhumist (`:45-53`) ne sont pas atomiques |
 | Clés d'API hachées (SHA-256) avec cache court | `internal/middleware/apikey_auth.go` | Une implémentation supplémentaire de `auth.Verifier` |
-| Webhooks signés HMAC avec période de grâce lors de la rotation du secret | `internal/infrastructure/webhook/dispatcher.go` | Module dédié, secret stocké chiffré |
+| Webhooks signés HMAC avec période de grâce lors de la rotation du secret | `internal/infrastructure/webhook/dispatcher.go` | Fonctionnalité dédiée (un fichier `webhook_*` par couche, client d'envoi dans `internal/infrastructure`), secret stocké chiffré |
 | Vérification de révocation Firebase / ré-authentification récente | `RequireFreshAuth`, `RequireRecentAuth` | `Principal.AuthTime` est déjà exposé ; voir `docs/decisions.md` §7 |
-| Capture Sentry des 5xx | `internal/handler/errors.go` | Point d'accroche unique : `httpx.WriteError` |
+| Capture Sentry des 5xx | `internal/handler/errors.go` | Point d'accroche unique : `httpx.WriteError` (`internal/utils/httpx/problem.go`) |
 
 ## 4. À signaler côté Bhumist
 

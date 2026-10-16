@@ -1,5 +1,5 @@
 // Package app is the composition root: it opens the infrastructure, wires
-// every module with plain constructor injection (no container, no globals)
+// every feature with plain constructor injection (no container, no globals)
 // and runs the servers. It is the only package that knows every other one.
 package app
 

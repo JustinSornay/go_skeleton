@@ -3,8 +3,9 @@
 //
 // Typical use is a decorator around a slow dependency (an external API
 // client, an expensive aggregation): the decorator implements the same
-// interface as the wrapped component and calls ReadThrough. Cache failures
-// are logged and bypassed — the cache must never take the service down.
+// interface as the wrapped component and reads through Loader.Get. Cache
+// failures are logged and bypassed — the cache must never take the service
+// down.
 package cache
 
 import (

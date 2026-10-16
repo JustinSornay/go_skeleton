@@ -3,15 +3,34 @@
 Chaque décision indique le contexte, le choix et ce qu'il faudrait pour la remettre en cause.
 Ajouter une entrée quand un choix structurant change.
 
-## 1. Organisation par fonctionnalité, cœur séparé des adaptateurs
+## 1. Couches globales (controller/service/repository/model…)
 
-- **Contexte** : dans Bhumist, l'organisation par couches à plat (`handler/` ≈ 50 fichiers, `usecase/`,
-  `persistence/`, DTO dans un paquet séparé) disperse une même fonctionnalité dans 5 dossiers, et la
-  documentation interne prévoyait déjà de découper `handler/` au-delà de 55 fichiers.
-- **Choix** : un dossier par module (`internal/project`), avec le cœur (domaine + cas d'usage) à la racine
-  du module et les adaptateurs en sous-paquets (`httpapi`, `postgres`). La séparation des couches de la
-  clean architecture est conservée, mais regroupée par fonctionnalité.
-- **Garde-fou** : `internal/archtest` vérifie les règles d'imports.
+- **Contexte** : l'équipe a choisi une organisation familière, avec un dossier par rôle classique,
+  où l'on sait d'emblée où ranger un contrôleur, un service ou un repository. Une première version
+  rangeait le code par fonctionnalité : un dossier par module, avec ses adaptateurs HTTP et PostgreSQL en
+  sous-paquets. Elle était plus cohésive, mais moins immédiate à parcourir.
+- **Choix** : sous `internal/`, un dossier global par couche :
+  - `model`, `service`, `repository` (+ `repositorytest`), `dto`, `controller` ;
+  - `middleware`, `infrastructure/*`, `utils/*`, `config` ;
+  - `app` (racine de composition) et `archtest`.
+
+  Chaque dossier a un README (rôle, ce qui y va, règles, conventions, squelette) et un exemple réel :
+  l'entité `project`, qui traverse toutes les couches. La carte est dans
+  [`internal/README.md`](../internal/README.md).
+- **Compromis** : une fonctionnalité s'étale sur plusieurs dossiers, et les paquets sont partagés par
+  toutes les entités. Deux choses compensent :
+  - **une convention de nommage** : un fichier par couche nommé d'après l'entité (`project.go`,
+    `project_repository.go`, `project_service.go`, `project_dto.go`, `project_controller.go`), et un
+    préfixe d'entité sur les identifiants (`ErrProjectNotFound`, `NewProjectService`) ;
+  - **des règles de dépendances vérifiées** par `internal/archtest` : `model` sans HTTP ni SQL,
+    `service` sans transport ni stockage, `controller` sans accès aux repositories, kits de test
+    interdits en production, dossiers inconnus refusés.
+
+  L'inversion de dépendances de la clean architecture est conservée : `repository` implémente les
+  interfaces déclarées dans `model`.
+- **À reconsidérer si** le nombre d'entités rend les dossiers difficiles à parcourir. On pourrait alors
+  découper chaque couche en sous-paquets par domaine, en adaptant `classify` et `rules` dans
+  `internal/archtest/arch_test.go`.
 
 ## 2. Les handlers retournent des erreurs ; pas de `panic`
 
@@ -42,7 +61,7 @@ et sans dépendance : en sortir plus tard reste simple.
   PostgreSQL typées, `CollectRows`/`RowToStructByName`.
 - Pas d'ORM : le SQL reste lisible et revu comme du code (choix déjà fait dans Bhumist).
 - Si le volume de requêtes grossit, [sqlc](https://sqlc.dev) peut générer le code de mapping à partir de
-  fichiers `.sql` sans changer l'architecture (il produirait le contenu des paquets `postgres`).
+  fichiers `.sql` sans changer l'architecture (il produirait le code de mapping de `internal/repository`).
 
 ## 6. Configuration 100 % variables d'environnement
 
@@ -79,11 +98,13 @@ Les fichiers SQL sont embarqués (`embed.FS`) et appliqués par `cmd/migrate` (A
 Le binaire et son schéma voyagent ensemble ; aucun outil à installer en production. En production,
 `migrate up` s'exécute comme étape de release (job, init container), jamais au démarrage de l'API.
 
-## 10. Faux écrits à la main + suite de contrat
+## 10. Fakes écrits à la main + suite de contrat
 
-Pas de mocks générés (choix de Bhumist conservé). Nouveauté : la suite `RepositoryContract` est exécutée
-contre le faux **et** contre PostgreSQL, ce qui garantit que le faux reproduit fidèlement le comportement
-réel (portée par propriétaire, unicité insensible à la casse, ordre, pagination).
+Pas de mocks générés (choix de Bhumist conservé). Nouveauté : la suite
+`repositorytest.ProjectRepositoryContract` est exécutée contre le fake **et** contre PostgreSQL, ce qui
+garantit que le fake reproduit fidèlement le comportement réel (filtrage par propriétaire, unicité
+insensible à la casse, ordre, pagination). Les fakes et les contrats vivent dans
+`internal/repository/repositorytest`.
 
 ## 11. Bases de test clonées depuis un template
 
@@ -99,12 +120,15 @@ dans le temps (insertion locale dans l'index de clé primaire) et connus avant l
 ## 13. Observabilité : Prometheus et slog par défaut, pas d'OpenTelemetry
 
 Les métriques RED et les logs corrélés couvrent l'essentiel sans infrastructure supplémentaire. Pour le
-tracing distribué, ajouter le SDK OpenTelemetry dans `internal/platform` (initialisation dans
-`app.New`, middleware `otelhttp` dans le routeur, `otelpgx` pour les requêtes SQL). Pour Sentry, brancher
-la capture des 5xx dans `httpx.WriteError`, seul point par lequel passent toutes les erreurs serveur.
+tracing distribué, ajouter le SDK OpenTelemetry dans un paquet `internal/infrastructure/tracing`
+(initialisation dans `app.New`, middleware `otelhttp` dans le routeur, `otelpgx` branché dans
+`internal/infrastructure/database`). Pour Sentry, brancher la capture des 5xx dans `httpx.WriteError`
+(`internal/utils/httpx/problem.go`), seul point par lequel passent toutes les erreurs serveur.
 
 ## 14. Rate limiting en mémoire
 
 Suffisant pour protéger une instance contre les rafales. Avec plusieurs réplicas, la limite effective est
 multipliée par leur nombre. Pour une limite globale exacte ou des quotas par utilisateur (comme les
 quotas journaliers de Bhumist), ajouter un limiteur Redis atomique (script Lua `INCR` + `PEXPIRE`).
+Le middleware, dans `internal/middleware`, dépendrait alors d'une petite interface de compteur.
+Celle-ci serait implémentée dans `internal/infrastructure` et branchée par `internal/app`.

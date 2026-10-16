@@ -26,14 +26,14 @@ type Deps struct {
 	Config   config.Config
 	Logger   *slog.Logger
 	DB       *database.DB
-	Cache    cache.Store // shared cache for modules that need one (see docs/architecture.md)
+	Cache    cache.Store // shared cache for features that need one (see docs/architecture.md)
 	Verifier auth.Verifier
 	Health   *health.Checker
 	Metrics  *metrics.HTTP   // optional
 	Limiter  *mw.RateLimiter // optional; nil disables rate limiting
 }
 
-// NewRouter wires every module and returns the public HTTP handler.
+// NewRouter wires every feature and returns the public HTTP handler.
 //
 // Middleware order matters (outermost first):
 //
@@ -97,7 +97,7 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 	return r, nil
 }
 
-// One constructor per module keeps NewRouter readable as modules grow.
+// One constructor per feature keeps NewRouter readable as features grow.
 func projectModule(d Deps) *controller.ProjectController {
 	repo := repository.NewProjectRepository(d.DB)
 	svc := service.NewProjectService(repo, d.DB, repository.NewAuditRepository(d.DB))

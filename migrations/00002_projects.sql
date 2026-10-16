@@ -1,6 +1,6 @@
 -- +goose Up
--- Example module table (internal/project). Replace or delete it together
--- with the module when starting a real project.
+-- Example table (model/project.go, repository/project_repository.go). Replace or delete it together
+-- with the project_* files when starting a real project.
 CREATE TABLE projects (
     id          uuid        PRIMARY KEY,
     owner_id    text        NOT NULL,

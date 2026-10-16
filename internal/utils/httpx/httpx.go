@@ -1,20 +1,24 @@
-// Package httpx contains the HTTP plumbing shared by every module: an
+// Package httpx contains the HTTP plumbing shared by every controller: an
 // error-returning handler signature, RFC 9457 problem responses, request
 // binding/validation and JSON rendering.
 //
 // Handlers return errors instead of panicking or writing error responses
 // themselves:
 //
-//	func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
-//		id, err := httpx.PathUUID(r, "id")
+//	func (c *ProjectController) get(w http.ResponseWriter, r *http.Request) error {
+//		owner, err := currentUser(r)
 //		if err != nil {
 //			return err
 //		}
-//		p, err := h.svc.Get(r.Context(), id)
+//		id, err := httpx.PathUUID(r, "id")
+//		if err != nil {
+//			return model.ErrProjectNotFound
+//		}
+//		p, err := c.svc.Get(r.Context(), owner, id)
 //		if err != nil {
 //			return err // *apperr.Error kinds become 4xx, anything else a logged 500
 //		}
-//		return httpx.JSON(w, http.StatusOK, toResponse(p))
+//		return httpx.JSON(w, http.StatusOK, dto.ToProjectResponse(p))
 //	}
 package httpx
 
