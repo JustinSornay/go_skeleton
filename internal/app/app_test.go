@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/JustinSornay/go_skeleton/internal/app"
-	"github.com/JustinSornay/go_skeleton/internal/platform/auth"
-	"github.com/JustinSornay/go_skeleton/internal/platform/cache"
-	"github.com/JustinSornay/go_skeleton/internal/platform/database/dbtest"
-	"github.com/JustinSornay/go_skeleton/internal/platform/health"
-	"github.com/JustinSornay/go_skeleton/internal/platform/logging"
-	"github.com/JustinSornay/go_skeleton/internal/platform/requestid"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/auth"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/cache"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database/dbtest"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/health"
+	"github.com/JustinSornay/go_skeleton/internal/utils/logging"
+	"github.com/JustinSornay/go_skeleton/internal/utils/requestid"
 )
 
 func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }

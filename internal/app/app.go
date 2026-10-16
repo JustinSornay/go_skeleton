@@ -11,14 +11,14 @@ import (
 	"net/http/pprof"
 	"time"
 
-	"github.com/JustinSornay/go_skeleton/internal/platform/auth"
-	"github.com/JustinSornay/go_skeleton/internal/platform/cache"
-	"github.com/JustinSornay/go_skeleton/internal/platform/config"
-	"github.com/JustinSornay/go_skeleton/internal/platform/database"
-	"github.com/JustinSornay/go_skeleton/internal/platform/health"
-	"github.com/JustinSornay/go_skeleton/internal/platform/metrics"
-	mw "github.com/JustinSornay/go_skeleton/internal/platform/middleware"
-	"github.com/JustinSornay/go_skeleton/internal/platform/server"
+	"github.com/JustinSornay/go_skeleton/internal/config"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/auth"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/cache"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/health"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/metrics"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/server"
+	mw "github.com/JustinSornay/go_skeleton/internal/middleware"
 	"github.com/JustinSornay/go_skeleton/migrations"
 )
 

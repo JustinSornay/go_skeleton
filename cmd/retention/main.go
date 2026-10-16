@@ -20,10 +20,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JustinSornay/go_skeleton/internal/platform/actor"
-	"github.com/JustinSornay/go_skeleton/internal/platform/config"
-	"github.com/JustinSornay/go_skeleton/internal/platform/database"
-	"github.com/JustinSornay/go_skeleton/internal/platform/logging"
+	"github.com/JustinSornay/go_skeleton/internal/config"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database"
+	"github.com/JustinSornay/go_skeleton/internal/utils/actor"
+	"github.com/JustinSornay/go_skeleton/internal/utils/logging"
 )
 
 func main() {

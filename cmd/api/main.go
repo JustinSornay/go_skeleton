@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/JustinSornay/go_skeleton/internal/app"
-	"github.com/JustinSornay/go_skeleton/internal/platform/config"
-	"github.com/JustinSornay/go_skeleton/internal/platform/logging"
+	"github.com/JustinSornay/go_skeleton/internal/config"
+	"github.com/JustinSornay/go_skeleton/internal/utils/logging"
 )
 
 // version is set at build time: -ldflags "-X main.version=$(git describe)".

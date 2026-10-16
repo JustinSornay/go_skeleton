@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JustinSornay/go_skeleton/internal/platform/database/dbtest"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database/dbtest"
 )
 
 func TestMain(m *testing.M) { os.Exit(dbtest.Main(m)) }

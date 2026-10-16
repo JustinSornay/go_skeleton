@@ -23,8 +23,8 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	"github.com/JustinSornay/go_skeleton/internal/platform/config"
-	"github.com/JustinSornay/go_skeleton/internal/platform/database"
+	"github.com/JustinSornay/go_skeleton/internal/config"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database"
 	"github.com/JustinSornay/go_skeleton/migrations"
 )
 

@@ -74,49 +74,93 @@ func listPackages(t *testing.T) []pkg {
 	return pkgs
 }
 
-// layer classifies a package path relative to the module.
+// layer classifies a package by the folder it lives in.
 type layer struct {
-	kind   string // "cmd", "app", "platform", "core", "adapter", "testkit", "other"
-	module string // business module name for core/adapter/testkit
-	sub    string // adapter name ("httpapi", "postgres", …)
+	// name is the folder under internal/ ("model", "service", "utils", …),
+	// or "cmd", "outside" (module packages outside internal/ and cmd/, e.g.
+	// migrations), "external" (stdlib and third-party) or "unknown" (a folder
+	// under internal/ that is not a known layer).
+	name string
+	// testkit is set for test-support packages (repositorytest, dbtest):
+	// their name ends in "test", like the standard library's httptest.
+	testkit bool
+}
+
+// layers are the folders allowed directly under internal/.
+var layers = []string{
+	"app", "archtest", "config", "controller", "dto", "infrastructure",
+	"middleware", "model", "repository", "service", "utils",
 }
 
 func classify(path string) layer {
 	rel, ok := strings.CutPrefix(path, module+"/")
 	if !ok {
-		return layer{kind: "external"}
+		if path == module {
+			return layer{name: "outside"}
+		}
+		return layer{name: "external"}
 	}
 	parts := strings.Split(rel, "/")
 	switch {
 	case parts[0] == "cmd":
-		return layer{kind: "cmd"}
-	case parts[0] != "internal" || len(parts) < 2:
-		return layer{kind: "other"}
-	case parts[1] == "app":
-		return layer{kind: "app"}
-	case parts[1] == "platform":
-		return layer{kind: "platform", sub: strings.Join(parts[2:], "/")}
-	case parts[1] == "archtest":
-		return layer{kind: "other"}
-	case len(parts) == 2:
-		return layer{kind: "core", module: parts[1]}
-	case strings.HasSuffix(parts[2], "test"):
-		return layer{kind: "testkit", module: parts[1], sub: parts[2]}
-	default:
-		return layer{kind: "adapter", module: parts[1], sub: parts[2]}
+		return layer{name: "cmd"}
+	case parts[0] != "internal":
+		return layer{name: "outside"}
+	case len(parts) < 2 || !slices.Contains(layers, parts[1]):
+		return layer{name: "unknown"}
+	}
+	last := parts[len(parts)-1]
+	return layer{
+		name:    parts[1],
+		testkit: parts[1] != "archtest" && strings.HasSuffix(last, "test"),
 	}
 }
 
-// Infrastructure packages a module core must never import directly.
-var forbiddenInCore = []string{
-	"net/http",
-	"database/sql",
-	"github.com/jackc/pgx",
-	"github.com/redis/go-redis",
-	"github.com/go-chi/chi",
-	module + "/internal/platform/database",
-	module + "/internal/platform/httpx",
-	module + "/internal/platform/middleware",
+// Transport and storage packages the business layers must never import.
+var (
+	transport = []string{"net/http", "github.com/go-chi/chi"}
+	storage   = []string{"database/sql", "github.com/jackc/pgx", "github.com/redis/go-redis"}
+)
+
+// rule restricts what a layer's non-test files may import.
+type rule struct {
+	// allow lists the module packages (path prefixes relative to the module)
+	// the layer may import. Any other module package is forbidden.
+	allow []string
+	// outside also allows module packages outside internal/ (migrations).
+	outside bool
+	// deny lists import path prefixes that are forbidden even when allow or
+	// the external rule would let them through.
+	deny []string
+}
+
+// rules is the dependency matrix, documented in internal/README.md. Layers
+// without an entry (app, archtest, cmd, outside) are only subject to the
+// global rules of TestDependencyRules.
+var rules = map[string]rule{
+	"utils":  {allow: []string{"internal/utils"}},
+	"config": {},
+	"model": {
+		allow: []string{"internal/utils/apperr"},
+		deny:  slices.Concat(transport, storage),
+	},
+	"service": {
+		allow: []string{"internal/model", "internal/utils"},
+		deny:  slices.Concat(transport, storage, []string{module + "/internal/utils/httpx"}),
+	},
+	"dto": {allow: []string{"internal/model", "internal/utils"}},
+	"repository": {
+		allow: []string{"internal/model", "internal/infrastructure/database", "internal/utils"},
+		deny:  transport,
+	},
+	"infrastructure": {
+		allow:   []string{"internal/infrastructure", "internal/utils"},
+		outside: true,
+	},
+	"middleware": {allow: []string{"internal/utils", "internal/infrastructure/auth"}},
+	"controller": {
+		allow: []string{"internal/service", "internal/dto", "internal/model", "internal/utils", "internal/infrastructure/auth"},
+	},
 }
 
 func hasPrefix(imp string, prefixes []string) bool {
@@ -128,52 +172,140 @@ func hasPrefix(imp string, prefixes []string) bool {
 	return false
 }
 
+// violation returns why a package of layer from may not import imp, or ""
+// when the import is allowed.
+func violation(from layer, imp string) string {
+	to := classify(imp)
+	switch {
+	case to.name == "cmd":
+		return "nothing may import a command"
+	case to.name == "app" && from.name != "cmd":
+		return "only commands may import the composition root (internal/app)"
+	case to.testkit && !from.testkit:
+		return "production code must not import test kits"
+	}
+	r, ok := rules[from.name]
+	if !ok {
+		return ""
+	}
+	if hasPrefix(imp, r.deny) {
+		return from.name + " must not depend on " + strings.TrimPrefix(imp, module+"/")
+	}
+	switch to.name {
+	case "external":
+		return ""
+	case "outside":
+		if r.outside {
+			return ""
+		}
+	default:
+		if hasPrefix(strings.TrimPrefix(imp, module+"/"), r.allow) {
+			return ""
+		}
+	}
+	if len(r.allow) == 0 {
+		return from.name + " must not import other packages of the module"
+	}
+	why := from.name + " may only import " + strings.Join(r.allow, ", ")
+	if r.outside {
+		why += " and module packages outside internal/"
+	}
+	return why
+}
+
 func TestDependencyRules(t *testing.T) {
 	for _, p := range listPackages(t) {
 		from := classify(p.ImportPath)
+		name := strings.TrimPrefix(p.ImportPath, module+"/")
+		if from.name == "unknown" {
+			t.Errorf("%s: unknown folder; packages under internal/ must live in one of %v", name, layers)
+			continue
+		}
 		for _, imp := range p.Imports {
-			to := classify(imp)
-			violation := ""
-			switch {
-			case to.kind == "cmd":
-				violation = "nothing may import a command"
-			case to.kind == "app" && from.kind != "cmd":
-				violation = "only commands may import the composition root (internal/app)"
-			case from.kind == "platform" && (to.kind == "core" || to.kind == "adapter" || to.kind == "testkit"):
-				violation = "platform packages must not depend on business modules"
-			case from.kind == "core" && hasPrefix(imp, forbiddenInCore):
-				violation = "a module core (domain + use cases) must not depend on transport or storage"
-			case from.kind == "core" && (to.kind == "adapter" || to.kind == "testkit"):
-				violation = "a module core must not import adapters"
-			case from.kind == "adapter" && to.kind == "adapter":
-				violation = "adapters must not import other adapters"
-			case from.kind == "adapter" && to.module != "" && to.module != from.module && to.kind != "core":
-				violation = "modules may only use each other through their core package"
-			case (from.kind == "core" || from.kind == "adapter") && to.kind == "testkit":
-				violation = "production code must not import test kits"
-			}
-			if violation != "" {
-				t.Errorf("%s imports %s: %s", strings.TrimPrefix(p.ImportPath, module+"/"), strings.TrimPrefix(imp, module+"/"), violation)
+			if why := violation(from, imp); why != "" {
+				t.Errorf("%s imports %s: %s", name, strings.TrimPrefix(imp, module+"/"), why)
 			}
 		}
 	}
 }
 
+// TestViolations checks the matrix itself on representative imports, so a
+// mistake in the rules cannot silently disable one of them.
+func TestViolations(t *testing.T) {
+	m := func(rel string) string { return module + "/" + rel }
+	tests := []struct {
+		from, imp string
+		allowed   bool
+	}{
+		{m("internal/model"), m("internal/utils/apperr"), true},
+		{m("internal/model"), "net/http", false},
+		{m("internal/model"), "github.com/jackc/pgx/v5", false},
+		{m("internal/model"), m("internal/utils/httpx"), false},
+		{m("internal/model"), m("internal/service"), false},
+		{m("internal/service"), m("internal/model"), true},
+		{m("internal/service"), m("internal/utils/actor"), true},
+		{m("internal/service"), m("internal/utils/httpx"), false},
+		{m("internal/service"), "github.com/go-chi/chi/v5", false},
+		{m("internal/service"), m("internal/repository"), false},
+		{m("internal/dto"), m("internal/utils/httpx"), true},
+		{m("internal/dto"), m("internal/service"), false},
+		{m("internal/repository"), m("internal/infrastructure/database"), true},
+		{m("internal/repository"), m("internal/infrastructure/cache"), false},
+		{m("internal/repository"), "net/http", false},
+		{m("internal/repository/repositorytest"), m("internal/model"), true},
+		{m("internal/repository/repositorytest"), "github.com/go-chi/chi/v5", false},
+		{m("internal/infrastructure/database/dbtest"), m("migrations"), true},
+		{m("internal/infrastructure/cache"), m("internal/utils/logging"), true},
+		{m("internal/infrastructure/auth"), m("internal/model"), false},
+		{m("internal/infrastructure/auth"), m("internal/config"), false},
+		{m("internal/middleware"), m("internal/infrastructure/auth"), true},
+		{m("internal/middleware"), m("internal/infrastructure/database"), false},
+		{m("internal/middleware"), m("internal/service"), false},
+		{m("internal/controller"), m("internal/service"), true},
+		{m("internal/controller"), m("internal/repository"), false},
+		{m("internal/controller"), m("internal/infrastructure/database"), false},
+		{m("internal/controller"), m("internal/repository/repositorytest"), false},
+		{m("internal/utils/httpx"), m("internal/utils/apperr"), true},
+		{m("internal/utils/httpx"), m("internal/model"), false},
+		{m("internal/config"), m("internal/utils/logging"), false},
+		{m("internal/app"), m("internal/repository"), true},
+		{m("internal/app"), m("internal/infrastructure/database/dbtest"), false},
+		{m("internal/service"), m("internal/app"), false},
+		{m("cmd/api"), m("internal/app"), true},
+		{m("internal/app"), m("cmd/api"), false},
+	}
+	for _, tt := range tests {
+		why := violation(classify(tt.from), tt.imp)
+		if allowed := why == ""; allowed != tt.allowed {
+			t.Errorf("%s -> %s: allowed = %v (%q), want %v", tt.from, tt.imp, allowed, why, tt.allowed)
+		}
+	}
+}
+
 func TestClassify(t *testing.T) {
-	tests := map[string]string{
-		module + "/cmd/api":                      "cmd",
-		module + "/internal/app":                 "app",
-		module + "/internal/platform/httpx":      "platform",
-		module + "/internal/project":             "core",
-		module + "/internal/project/postgres":    "adapter",
-		module + "/internal/project/httpapi":     "adapter",
-		module + "/internal/project/projecttest": "testkit",
-		module + "/migrations":                   "other",
-		"net/http":                               "external",
+	tests := map[string]layer{
+		module + "/cmd/api":                                 {name: "cmd"},
+		module + "/internal/app":                            {name: "app"},
+		module + "/internal/config":                         {name: "config"},
+		module + "/internal/controller":                     {name: "controller"},
+		module + "/internal/dto":                            {name: "dto"},
+		module + "/internal/middleware":                     {name: "middleware"},
+		module + "/internal/model":                          {name: "model"},
+		module + "/internal/repository":                     {name: "repository"},
+		module + "/internal/repository/repositorytest":      {name: "repository", testkit: true},
+		module + "/internal/service":                        {name: "service"},
+		module + "/internal/infrastructure/database":        {name: "infrastructure"},
+		module + "/internal/infrastructure/database/dbtest": {name: "infrastructure", testkit: true},
+		module + "/internal/utils/httpx":                    {name: "utils"},
+		module + "/internal/archtest":                       {name: "archtest"},
+		module + "/internal/platform/httpx":                 {name: "unknown"},
+		module + "/migrations":                              {name: "outside"},
+		module:                                              {name: "outside"},
+		"net/http":                                          {name: "external"},
 	}
 	for path, want := range tests {
-		if got := classify(path).kind; got != want {
-			t.Errorf("classify(%q) = %q, want %q", path, got, want)
+		if got := classify(path); got != want {
+			t.Errorf("classify(%q) = %+v, want %+v", path, got, want)
 		}
 	}
 }

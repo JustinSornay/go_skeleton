@@ -12,10 +12,10 @@ import (
 
 	"github.com/JustinSornay/go_skeleton/api"
 	"github.com/JustinSornay/go_skeleton/internal/app"
-	"github.com/JustinSornay/go_skeleton/internal/platform/auth"
-	"github.com/JustinSornay/go_skeleton/internal/platform/config"
-	"github.com/JustinSornay/go_skeleton/internal/platform/health"
-	"github.com/JustinSornay/go_skeleton/internal/platform/logging"
+	"github.com/JustinSornay/go_skeleton/internal/config"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/auth"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/health"
+	"github.com/JustinSornay/go_skeleton/internal/utils/logging"
 )
 
 func testConfig(t *testing.T) config.Config {

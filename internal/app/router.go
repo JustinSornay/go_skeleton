@@ -7,18 +7,17 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/JustinSornay/go_skeleton/api"
-	"github.com/JustinSornay/go_skeleton/internal/platform/audit"
-	"github.com/JustinSornay/go_skeleton/internal/platform/auth"
-	"github.com/JustinSornay/go_skeleton/internal/platform/cache"
-	"github.com/JustinSornay/go_skeleton/internal/platform/config"
-	"github.com/JustinSornay/go_skeleton/internal/platform/database"
-	"github.com/JustinSornay/go_skeleton/internal/platform/health"
-	"github.com/JustinSornay/go_skeleton/internal/platform/httpx"
-	"github.com/JustinSornay/go_skeleton/internal/platform/metrics"
-	mw "github.com/JustinSornay/go_skeleton/internal/platform/middleware"
-	"github.com/JustinSornay/go_skeleton/internal/project"
-	projecthttp "github.com/JustinSornay/go_skeleton/internal/project/httpapi"
-	projectpg "github.com/JustinSornay/go_skeleton/internal/project/postgres"
+	"github.com/JustinSornay/go_skeleton/internal/config"
+	"github.com/JustinSornay/go_skeleton/internal/controller"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/auth"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/cache"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/database"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/health"
+	"github.com/JustinSornay/go_skeleton/internal/infrastructure/metrics"
+	mw "github.com/JustinSornay/go_skeleton/internal/middleware"
+	"github.com/JustinSornay/go_skeleton/internal/repository"
+	"github.com/JustinSornay/go_skeleton/internal/service"
+	"github.com/JustinSornay/go_skeleton/internal/utils/httpx"
 )
 
 // Deps are the infrastructure handles the router is built from. Tests build
@@ -99,8 +98,8 @@ func NewRouter(d Deps) (*chi.Mux, error) {
 }
 
 // One constructor per module keeps NewRouter readable as modules grow.
-func projectModule(d Deps) *projecthttp.Handler {
-	repo := projectpg.NewRepository(d.DB)
-	svc := project.NewService(repo, d.DB, audit.NewPostgresRecorder(d.DB))
-	return projecthttp.NewHandler(svc)
+func projectModule(d Deps) *controller.ProjectController {
+	repo := repository.NewProjectRepository(d.DB)
+	svc := service.NewProjectService(repo, d.DB, repository.NewAuditRepository(d.DB))
+	return controller.NewProjectController(svc)
 }
