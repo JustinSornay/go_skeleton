@@ -2,6 +2,8 @@ module github.com/JustinSornay/go_skeleton
 
 go 1.27.0
 
+toolchain go1.27.2
+
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.2
 	github.com/alicebob/miniredis/v2 v2.40.0
